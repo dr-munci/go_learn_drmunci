@@ -88,6 +88,35 @@ go run main.go
 Varsayılan port: `8090`  
 Base URL: `http://localhost:8090`
 
+## Değerlendirme İçin Hızlı Test
+
+Projeyi kontrol edecek kişi için en hızlı doğrulama adımları:
+
+1. Uygulamayı çalıştır:
+
+```bash
+go mod tidy
+swag init
+go run main.go
+```
+
+2. Swagger üzerinden test et:
+
+- `http://localhost:8090/swagger/index.html`
+
+3. Otomatik checklist scriptini çalıştır (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-ai-checklist.ps1
+```
+
+4. Docker ile test et (opsiyonel):
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
 ## Swagger
 
 Sunucu çalışırken:
