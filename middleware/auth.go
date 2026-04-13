@@ -3,68 +3,57 @@ package middleware
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var JWTSecret = []byte("your-secret-key-change-in-production")
+var JWTSecret = []byte("golearn-secret-key-2026")
+
+func GenerateToken(userID uint, role string) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id": userID,
+		"role":    role,
+		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(JWTSecret)
+}
 
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header gerekli"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token gerekli"})
 			c.Abort()
 			return
 		}
-
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Geçersiz Authorization formatı"})
-			c.Abort()
-			return
-		}
-
-		tokenString := parts[1]
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
 			return JWTSecret, nil
 		})
-
 		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Geçersiz veya süresi dolmuş token"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Geçersiz token"})
 			c.Abort()
 			return
 		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token claims okunamadı"})
-			c.Abort()
-			return
-		}
-
-		c.Set("userID", uint(claims["user_id"].(float64)))
-		c.Set("userRole", claims["role"].(string))
+		claims := token.Claims.(jwt.MapClaims)
+		c.Set("user_id", uint(claims["user_id"].(float64)))
+		c.Set("role", claims["role"].(string))
 		c.Next()
 	}
 }
 
-func TeacherOnly() gin.HandlerFunc {
+func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role, exists := c.Get("userRole")
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Yetkilendirme bilgisi bulunamadı"})
-			c.Abort()
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
 			return
 		}
-
-		if role != "teacher" && role != "admin" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Bu işlem için öğretmen yetkisi gerekli"})
-			c.Abort()
-			return
-		}
-
 		c.Next()
 	}
 }
