@@ -11,13 +11,13 @@ type Quiz struct {
 
 type Question struct {
 	gorm.Model
-	Text    string `json:"text"`
-	OptionA string `json:"option_a"`
-	OptionB string `json:"option_b"`
-	OptionC string `json:"option_c"`
-	OptionD string `json:"option_d"`
-	Correct string `json:"-" gorm:"not null"`
-	QuizID  uint   `json:"quiz_id"`
+	Text          string `json:"text"`
+	OptionA       string `json:"option_a"`
+	OptionB       string `json:"option_b"`
+	OptionC       string `json:"option_c"`
+	OptionD       string `json:"option_d"`
+	CorrectAnswer string `json:"-" gorm:"column:correct_answer;not null"`
+	QuizID        uint   `json:"quiz_id"`
 }
 
 type QuizResult struct {

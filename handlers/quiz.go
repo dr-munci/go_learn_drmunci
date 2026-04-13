@@ -21,8 +21,21 @@ func GetQuiz(c *gin.Context) {
 }
 
 func CreateQuiz(c *gin.Context) {
-	var quiz models.Quiz
-	if err := c.ShouldBindJSON(&quiz); err != nil {
+	type createQuestionInput struct {
+		Text    string `json:"text" binding:"required"`
+		OptionA string `json:"option_a" binding:"required"`
+		OptionB string `json:"option_b" binding:"required"`
+		OptionC string `json:"option_c" binding:"required"`
+		OptionD string `json:"option_d" binding:"required"`
+		Correct string `json:"correct" binding:"required,oneof=a b c d A B C D"`
+	}
+	type createQuizInput struct {
+		Title     string                `json:"title" binding:"required"`
+		Questions []createQuestionInput `json:"questions" binding:"required,min=1"`
+	}
+
+	var input createQuizInput
+	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -33,7 +46,21 @@ func CreateQuiz(c *gin.Context) {
 		return
 	}
 
-	quiz.LessonID = lesson.ID
+	quiz := models.Quiz{
+		Title:    input.Title,
+		LessonID: lesson.ID,
+	}
+	for _, q := range input.Questions {
+		quiz.Questions = append(quiz.Questions, models.Question{
+			Text:          q.Text,
+			OptionA:       q.OptionA,
+			OptionB:       q.OptionB,
+			OptionC:       q.OptionC,
+			OptionD:       q.OptionD,
+			CorrectAnswer: strings.ToLower(q.Correct),
+		})
+	}
+
 	if err := database.DB.Create(&quiz).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Quiz oluşturulamadı"})
 		return
@@ -63,7 +90,7 @@ func SubmitQuiz(c *gin.Context) {
 	score, total := 0, len(quiz.Questions)
 	for _, q := range quiz.Questions {
 		if ans, ok := input.Answers[fmt.Sprintf("%d", q.ID)]; ok {
-			if strings.EqualFold(ans, q.Correct) {
+			if strings.EqualFold(ans, q.CorrectAnswer) {
 				score++
 			}
 		}
