@@ -2,12 +2,23 @@ package main
 
 import (
 	"golearn/database"
+	_ "golearn/docs"
 	"golearn/handlers"
 	"golearn/middleware"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
+// @title GoLearn API
+// @version 1.0
+// @description Uzaktan Egitim Platformu REST API
+// @host localhost:8090
+// @BasePath /api
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
 func main() {
 	database.Connect()
 
@@ -44,6 +55,7 @@ func main() {
 	}
 
 	r.GET("/ws/classroom/:courseId", middleware.AuthMiddleware(), handlers.ClassroomWS)
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	r.Run(":8090")
 }
