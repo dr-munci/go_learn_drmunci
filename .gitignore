@@ -1,0 +1,4 @@
+golearn.db
+golearn
+*.exe
+.env
