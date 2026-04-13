@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  golearn:
+    build: .
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./golearn.db:/app/golearn.db
+    restart: unless-stopped
