@@ -1,0 +1,437 @@
+# GoLearn — Uzaktan Eğitim Platformu API
+# Cursor AI Kuralları
+
+## 🎯 Proje Genel Bakış
+Bu proje, Go (Golang) + Gin + GORM + SQLite kullanılarak inşa edilen
+tam kapsamlı bir uzaktan eğitim platformu REST API'sidir.
+Öğretmenler kurs/ders/quiz oluşturabilir; öğrenciler katılıp quiz çözebilir.
+
+---
+
+## 🏗️ Teknoloji Stack
+
+- **Dil:** Go (Golang) 1.21+
+- **Framework:** Gin Web Framework
+- **ORM:** GORM
+- **Veritabanı:** SQLite (dosya tabanlı, sıfır kurulum)
+- **Auth:** JWT (golang-jwt/jwt/v5) + bcrypt (golang.org/x/crypto)
+- **Gerçek Zamanlı:** WebSocket (gorilla/websocket)
+- **Container:** Docker + docker-compose
+
+---
+
+## 📁 Klasör Yapısı (zorunlu)
+
+```
+golearn/
+├── main.go
+├── go.mod
+├── go.sum
+├── .env
+├── Dockerfile
+├── docker-compose.yml
+├── .cursorrules
+├── config/
+│   └── config.go          # Env değişkenleri, DB bağlantısı
+├── middleware/
+│   ├── auth.go            # JWT doğrulama middleware
+│   ├── rbac.go            # Role-based access control
+│   └── rate_limit.go      # Rate limiting
+├── models/
+│   ├── user.go
+│   ├── course.go
+│   ├── lesson.go
+│   ├── quiz.go
+│   ├── question.go
+│   ├── enrollment.go
+│   └── progress.go
+├── handlers/
+│   ├── auth.go
+│   ├── course.go
+│   ├── lesson.go
+│   ├── quiz.go
+│   └── websocket.go
+├── routes/
+│   └── routes.go
+└── utils/
+    ├── jwt.go
+    └── response.go
+```
+
+---
+
+## 🧱 Model Kuralları (models/)
+
+### Tüm modeller şu alanları içermeli:
+```go
+type BaseModel struct {
+    ID        uint           `json:"id" gorm:"primaryKey"`
+    CreatedAt time.Time      `json:"created_at"`
+    UpdatedAt time.Time      `json:"updated_at"`
+    DeletedAt gorm.DeletedAt `json:"-" gorm:"index"` // soft delete
+}
+```
+
+### User Modeli (zorunlu alanlar):
+```go
+type User struct {
+    BaseModel
+    Name     string `json:"name" gorm:"not null"`
+    Email    string `json:"email" gorm:"unique;not null"`
+    Password string `json:"-" gorm:"not null"`     // JSON'da asla gösterme
+    Role     string `json:"role" gorm:"default:'student'"` // "teacher" | "student"
+}
+```
+
+### Kural: Password alanı hiçbir zaman JSON response'a eklenmemeli (`json:"-"`)
+
+### Course Modeli:
+```go
+type Course struct {
+    BaseModel
+    Title       string  `json:"title" gorm:"not null"`
+    Description string  `json:"description"`
+    TeacherID   uint    `json:"teacher_id"`
+    Teacher     User    `json:"teacher" gorm:"foreignKey:TeacherID"`
+    Lessons     []Lesson `json:"lessons,omitempty"`
+}
+```
+
+### Enrollment (Kayıt) Modeli:
+```go
+type Enrollment struct {
+    BaseModel
+    StudentID uint   `json:"student_id"`
+    CourseID  uint   `json:"course_id"`
+    Student   User   `json:"student,omitempty"`
+    Course    Course `json:"course,omitempty"`
+}
+```
+
+---
+
+## 🔐 Authentication Kuralları
+
+### JWT Token Yapısı:
+```go
+type Claims struct {
+    UserID uint   `json:"user_id"`
+    Email  string `json:"email"`
+    Role   string `json:"role"`
+    jwt.RegisteredClaims
+}
+```
+
+### Token Süresi: 24 saat (zorunlu)
+### Secret Key: .env dosyasından okunmalı → `JWT_SECRET`
+### Header formatı: `Authorization: Bearer <token>`
+
+### Auth Middleware (middleware/auth.go):
+- Header yoksa → 401 Unauthorized
+- Token geçersizse → 401 Unauthorized
+- Token süresi dolmuşsa → 401 Unauthorized
+- Geçerli token → `c.Set("user_id", claims.UserID)` ve `c.Set("role", claims.Role)`
+
+### RBAC Middleware (middleware/rbac.go):
+```go
+func RequireRole(roles ...string) gin.HandlerFunc
+// Kullanım: router.POST("/courses", AuthMiddleware(), RequireRole("teacher"), handler)
+```
+
+---
+
+## 🌐 API Endpoint Kuralları
+
+### Tüm endpoint'ler `/api/v1` prefix'i almalı
+
+### Auth Endpoints (public):
+```
+POST /api/v1/auth/register   → Kullanıcı kaydı
+POST /api/v1/auth/login      → JWT token alma
+```
+
+### Course Endpoints:
+```
+GET    /api/v1/courses              → Tüm kurslar (public)
+POST   /api/v1/courses              → Kurs oluştur (teacher only)
+GET    /api/v1/courses/:id          → Kurs detay (public)
+PUT    /api/v1/courses/:id          → Kurs güncelle (owner teacher)
+DELETE /api/v1/courses/:id          → Kurs sil (owner teacher)
+POST   /api/v1/courses/:id/enroll   → Kursa kayıt ol (student only)
+```
+
+### Lesson Endpoints:
+```
+POST   /api/v1/courses/:id/lessons          → Ders ekle (teacher only)
+GET    /api/v1/courses/:id/lessons          → Dersleri listele
+GET    /api/v1/courses/:id/lessons/:lid     → Ders detay
+PUT    /api/v1/courses/:id/lessons/:lid     → Ders güncelle (teacher only)
+DELETE /api/v1/courses/:id/lessons/:lid     → Ders sil (teacher only)
+```
+
+### Quiz Endpoints:
+```
+POST   /api/v1/lessons/:id/quiz             → Quiz oluştur (teacher only)
+GET    /api/v1/lessons/:id/quiz             → Quiz getir
+POST   /api/v1/lessons/:id/quiz/submit      → Quiz cevapla (student only)
+GET    /api/v1/students/progress            → İlerleme raporu (student only)
+```
+
+### WebSocket:
+```
+GET    /api/v1/ws/classroom/:courseId       → Canlı sınıf WebSocket
+```
+
+---
+
+## 📨 Response Formatı (zorunlu standart)
+
+### Başarılı Response:
+```json
+{
+  "success": true,
+  "message": "İşlem başarılı",
+  "data": { ... }
+}
+```
+
+### Hata Response:
+```json
+{
+  "success": false,
+  "message": "Hata mesajı",
+  "error": "detaylı hata (opsiyonel)"
+}
+```
+
+### Liste Response:
+```json
+{
+  "success": true,
+  "data": [...],
+  "total": 42,
+  "page": 1,
+  "per_page": 10
+}
+```
+
+### HTTP Status Kodları:
+- 200 → Başarılı GET/PUT
+- 201 → Başarılı POST (kaynak oluşturuldu)
+- 400 → Bad Request (validation hatası)
+- 401 → Unauthorized (token yok/geçersiz)
+- 403 → Forbidden (yetki yok)
+- 404 → Not Found
+- 409 → Conflict (zaten kayıtlı, email çakışması)
+- 429 → Too Many Requests (rate limit)
+- 500 → Internal Server Error
+
+---
+
+## 🛡️ Rate Limiting Kuralları
+
+```go
+// middleware/rate_limit.go
+// Auth endpoint'leri: 5 istek/dakika
+// Genel API: 60 istek/dakika
+// WebSocket bağlantıları: 10 bağlantı/kullanıcı
+```
+
+Kütüphane önerisi: `golang.org/x/time/rate` veya `github.com/ulule/limiter`
+
+---
+
+## 🔄 WebSocket Kuralları
+
+### Mesaj Formatı:
+```json
+{
+  "type": "message",
+  "sender_id": 1,
+  "sender_name": "Ali Hoca",
+  "content": "Merhaba sınıf!",
+  "timestamp": "2024-01-15T10:30:00Z"
+}
+```
+
+### Message Types:
+- `"message"` → Sohbet mesajı
+- `"join"` → Kullanıcı bağlandı
+- `"leave"` → Kullanıcı ayrıldı
+- `"announcement"` → Öğretmen duyurusu
+
+### Broadcast: Aynı courseId'ye bağlı tüm kullanıcılara gönder
+### Auth: WebSocket bağlantısında JWT token query param olarak gelebilir: `?token=...`
+
+---
+
+## 📦 Go Kodlama Kuralları
+
+### Genel:
+- Her handler fonksiyonu tek bir iş yapmalı (SRP)
+- `err != nil` kontrolü her zaman yapılmalı
+- Panic kullanma, error döndür
+- Magic number kullanma, constant tanımla
+
+### Handler Şablonu:
+```go
+func (h *Handler) CreateCourse(c *gin.Context) {
+    // 1. Kullanıcı kimliğini al
+    userID, _ := c.Get("user_id")
+    
+    // 2. Request body'yi parse et
+    var req CreateCourseRequest
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{
+            "success": false,
+            "message": "Geçersiz istek formatı",
+        })
+        return
+    }
+    
+    // 3. Validasyon
+    // 4. İş mantığı
+    // 5. Response
+    c.JSON(http.StatusCreated, gin.H{
+        "success": true,
+        "message": "Kurs oluşturuldu",
+        "data": course,
+    })
+}
+```
+
+### Validasyon Tag'leri (zorunlu):
+```go
+type RegisterRequest struct {
+    Name     string `json:"name" binding:"required,min=2,max=100"`
+    Email    string `json:"email" binding:"required,email"`
+    Password string `json:"password" binding:"required,min=6"`
+    Role     string `json:"role" binding:"required,oneof=teacher student"`
+}
+```
+
+### Şifre Hashleme:
+```go
+// Kayıt sırasında:
+hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+
+// Giriş sırasında:
+err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(plainPassword))
+```
+
+---
+
+## 🐳 Docker Kuralları
+
+### Dockerfile (multi-stage build zorunlu):
+```dockerfile
+# Stage 1: Build
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=1 GOOS=linux go build -o golearn ./main.go
+
+# Stage 2: Run
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates sqlite
+WORKDIR /root/
+COPY --from=builder /app/golearn .
+EXPOSE 8080
+CMD ["./golearn"]
+```
+
+### docker-compose.yml:
+```yaml
+version: "3.8"
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - JWT_SECRET=${JWT_SECRET}
+      - DB_PATH=./golearn.db
+    volumes:
+      - ./data:/root/data
+```
+
+### .env dosyası (örnek):
+```
+JWT_SECRET=supersecretkey123456789
+DB_PATH=./golearn.db
+SERVER_PORT=8080
+GIN_MODE=release
+```
+
+---
+
+## 🧪 Test Senaryoları (AI tarafından kontrol edilecek)
+
+Kodun şu 22 senaryoyu geçmesi gerekiyor:
+
+1. POST /auth/register → teacher kaydı
+2. POST /auth/register → student kaydı
+3. POST /auth/register → duplicate email → 409
+4. POST /auth/login → başarılı → JWT token
+5. POST /auth/login → yanlış şifre → 401
+6. GET /courses → token olmadan → çalışmalı (public)
+7. POST /courses → teacher token ile → 201
+8. POST /courses → student token ile → 403
+9. POST /courses → token olmadan → 401
+10. GET /courses/:id → var olan kurs
+11. GET /courses/:id → olmayan kurs → 404
+12. PUT /courses/:id → owner teacher → 200
+13. PUT /courses/:id → başka teacher → 403
+14. POST /courses/:id/enroll → student → 201
+15. POST /courses/:id/enroll → tekrar → 409
+16. POST /courses/:id/lessons → teacher → 201
+17. GET /courses/:id/lessons → 200
+18. POST /lessons/:id/quiz → teacher → quiz oluştur
+19. POST /lessons/:id/quiz/submit → student → cevapla
+20. GET /students/progress → student kendi ilerlemesi
+21. Rate limit → 6. istek → 429
+22. WebSocket /ws/classroom/:id → bağlan & mesaj gönder
+
+---
+
+## 🚦 Git Commit Formatı (zorunlu)
+
+```
+feat: kullanıcı kayıt ve login endpoint'leri eklendi
+feat: kurs CRUD işlemleri tamamlandı
+feat: ders yönetimi eklendi
+feat: quiz oluşturma ve cevaplama eklendi
+feat: websocket canlı sınıf özelliği eklendi
+feat: rate limiting middleware eklendi
+feat: docker ve docker-compose yapılandırması
+```
+
+Her adım tamamlandığında commit atılmalı. Commit geçmişi kontrol edilecek.
+
+---
+
+## ⛔ Yapma Listesi
+
+- Şifreyi düz metin olarak saklamak
+- JWT secret'ı koda gömmek (hardcode)
+- `c.JSON` çağrısından sonra `return` yazmayı unutmak
+- Hata durumunda 200 dönmek
+- SQL injection'a açık raw query yazmak (GORM kullan)
+- Authorization header'ını lowercase kontrol etmek
+- Token süresi dolmuş kullanıcıya veri döndürmek
+- Panic ile error handling yapmak
+
+---
+
+## ✅ Yap Listesi
+
+- Her endpoint'e uygun HTTP status kodu dön
+- Middleware'leri doğru sırayla uygula: Auth → RBAC → Handler
+- GORM AutoMigrate ile tabloları otomatik oluştur
+- Soft delete kullan (DeletedAt alanı ile)
+- WebSocket hub'ını goroutine ile yönet
+- .env dosyasını .gitignore'a ekle
+- Tüm response'ları standart formatta döndür
+- Rate limiting'i IP bazlı uygula
